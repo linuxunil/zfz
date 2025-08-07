@@ -31,10 +31,6 @@ pub const Matrix = struct {
         self.data[row * self.cols + col] = value;
     }
 
-    fn setCell(data: *[]u8, num_cols: usize, row: usize, col: usize, value: u8) void {
-        data[row * num_cols + col] = value;
-    }
-
     fn init(allocator: std.mem.Allocator, seqA: []const u8, seqB: []const u8) !Matrix {
         const rows = seqA.len + 2;
         const cols = seqB.len + 2;
