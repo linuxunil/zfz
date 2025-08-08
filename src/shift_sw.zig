@@ -22,18 +22,18 @@ pub const ShiftSW = struct {
     }
 
     pub fn scoreMatrixWithSize(self: *ShiftSW, comptime VEC_SIZE: u32) !void {
-        var prev_row_scores = try self.alloc.alloc(i16, self.seqA.len + VEC_SIZE);
+        var prev_row_scores = try self.alloc.alloc(i16, self.seqB.len + VEC_SIZE);
         defer self.alloc.free(prev_row_scores);
-        var vertical_gap_scores = try self.alloc.alloc(i16, self.seqA.len + VEC_SIZE);
+        var vertical_gap_scores = try self.alloc.alloc(i16, self.seqB.len + VEC_SIZE);
         defer self.alloc.free(vertical_gap_scores);
 
         @memset(prev_row_scores, 0);
         @memset(vertical_gap_scores, self.gap_penalty);
 
-        // Process seqB.len rows (each row compares against one character of seqB)
-        for (0..self.seqB.len) |row_idx| {
+        // Process seqA.len rows (each row compares against one character of seqA)
+        for (0..self.seqA.len) |row_idx| {
             var col_idx: usize = 0;
-            while (col_idx < self.seqA.len) : (col_idx += VEC_SIZE) {
+            while (col_idx < self.seqB.len) : (col_idx += VEC_SIZE) {
                 self.processVectorChunk(row_idx, col_idx, VEC_SIZE, &prev_row_scores, &vertical_gap_scores);
             }
         }
@@ -61,8 +61,8 @@ pub const ShiftSW = struct {
 
         var match_mismatch_scores: @Vector(VEC_SIZE, i16) = @splat(self.mismatch_score);
         for (0..VEC_SIZE) |pos| {
-            if (col_start + pos < self.seqA.len and row_index < self.seqB.len) {
-                if (self.seqA[col_start + pos] == self.seqB[row_index]) {
+            if (col_start + pos < self.seqB.len and row_index < self.seqA.len) {
+                if (self.seqA[row_index] == self.seqB[col_start + pos]) {
                     match_mismatch_scores[pos] = self.match_score;
                 }
             }
@@ -72,7 +72,7 @@ pub const ShiftSW = struct {
         var left_neighbor_score: i16 = if (col_start == 0) 0 else self.gap_penalty; // Carry-over from previous chunk
 
         for (0..VEC_SIZE) |pos| {
-            if (col_start + pos >= self.seqA.len) break;
+            if (col_start + pos >= self.seqB.len) break;
 
             // Calculate three scores for this position
             const diagonal_score = prev_row_vector[pos] + match_mismatch_scores[pos]; // diagonal + match/mismatch
@@ -123,8 +123,8 @@ test "GCGATTA & GCTTAC" {
 }
 
 test "CTACGCTATTTCA & CTATCTCGCTATCCA" {
-    const seqB = "CTACGCTATTTCA";
-    const seqA = "CTATCTCGCTATCCA";
+    const seqA = "CTACGCTATTTCA";
+    const seqB = "CTATCTCGCTATCCA";
 
     const score = try ShiftSW.similarity(seqA, seqB);
     try testing.expectEqual(25, score);
