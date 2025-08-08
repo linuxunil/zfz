@@ -28,6 +28,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const base_exe = b.addExecutable(.{
+        .name = "base_benchmark",
+        .root_source_file = b.path("src/base_benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(base_exe);
+    const run_benchmark = b.addRunArtifact(base_exe);
+    const benchmark_step = b.step("benchmark", "Run benchmarks");
+    benchmark_step.dependOn(&run_benchmark.step);
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
     // for actually invoking the compiler.

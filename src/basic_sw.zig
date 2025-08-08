@@ -38,7 +38,6 @@ pub const Matrix = struct {
 
         var data = try allocator.alloc(u8, data_size);
         @memset(data, 0);
-        std.debug.print("\ndata length: {d}\n", .{(rows * cols)});
 
         data[0 * cols + 0] = ' ';
         data[0 * cols + 1] = ' ';
@@ -140,7 +139,6 @@ pub const Matrix = struct {
         var matrix = try Matrix.init(alloc, lhs, rhs);
         defer matrix.deinit();
         const scores = matrix.getScore();
-        // matrix.print();
         return scores;
     }
 };

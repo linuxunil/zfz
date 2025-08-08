@@ -1,2 +1,127 @@
 [tools]
 zig = "latest"
+
+[vars]
+# Test sequences
+short_seqA = "GCGATTA"
+short_seqB = "GCTTAC"
+long_seqA = "CTACGCTATTTCA"
+long_seqB = "CTATCTCGCTATCCA"
+identical_seq = "ACGTACGTACGT"
+mismatch_seqA = "AAAAAAAAAA"
+mismatch_seqB = "TTTTTTTTTT"
+
+# Benchmark settings
+warmup_runs = "3"
+min_runs = "10"
+benchmark_bin = "./zig-out/bin/base_benchmark"
+
+[tasks.build]
+run = "zig build"
+alias = "b"
+
+[tasks."build:opt"]
+run = "zig build -Doptimize=ReleaseFast"
+
+[tasks."build:debug"]
+run = "zig build -Doptimize=Debug"
+
+# Individual benchmarks
+[tasks."bench:base:short"]
+run = "hyperfine -N '{{vars.benchmark_bin}} {{vars.short_seqA}} {{vars.short_seqB}}' --warmup {{vars.warmup_runs}} --min-runs {{vars.min_runs}}"
+depends = ["build"]
+alias = "bbs"
+
+[tasks."bench:base:long"]
+run = "hyperfine -N '{{vars.benchmark_bin}} {{vars.long_seqA}} {{vars.long_seqB}}' --warmup {{vars.warmup_runs}} --min-runs {{vars.min_runs}}"
+depends = ["build"]
+alias = "bbl"
+
+[tasks."bench:base:identical"]
+run = "hyperfine -N '{{vars.benchmark_bin}} {{vars.identical_seq}} {{vars.identical_seq}}' --warmup {{vars.warmup_runs}} --min-runs {{vars.min_runs}}"
+depends = ["build"]
+alias = "bbi"
+
+[tasks."bench:base:mismatch"]
+run = "hyperfine -N '{{vars.benchmark_bin}} {{vars.mismatch_seqA}} {{vars.mismatch_seqB}}' --warmup {{vars.warmup_runs}} --min-runs {{vars.min_runs}}"
+depends = ["build"]
+alias = "bbm"
+
+# Comparison benchmarks
+[tasks."bench:base:compare:size"]
+run = '''
+hyperfine -N \
+  --export-markdown benchmark_results.md \
+  --export-json benchmark_results.json \
+  "{{vars.benchmark_bin}} {{vars.short_seqA}} {{vars.short_seqB}}" \
+  "{{vars.benchmark_bin}} {{vars.long_seqA}} {{vars.long_seqB}}" \
+  --warmup {{vars.warmup_runs}} \
+  --min-runs {{vars.min_runs}}
+'''
+depends = ["build"]
+alias = "bbcs"
+
+[tasks."bench:base:compare:optimization"]
+run = '''
+zig build -Doptimize=Debug && cp zig-out/bin/base_benchmark zig-out/bin/base_benchmark_debug &&
+zig build -Doptimize=ReleaseFast && cp zig-out/bin/base_benchmark zig-out/bin/base_benchmark_release &&
+hyperfine -N \
+  "zig-out/bin/base_benchmark_debug {{vars.short_seqA}} {{vars.short_seqB}}" \
+  "zig-out/bin/base_benchmark_release {{vars.short_seqA}} {{vars.short_seqB}}" \
+  --warmup {{vars.warmup_runs}} \
+  --min-runs {{vars.min_runs}}
+'''
+alias = "bbco"
+
+[tasks."bench:base:all"]
+run = ["mise run bench:base:short", "mise run bench:base:long", "mise run bench:base:identical", "mise run bench:base:mismatch"]
+alias = "bba"
+
+# Visualization tasks
+[tasks."bench:base:plot"]
+run = '''
+mise run bench:base:compare:size &&
+uv run python3 scripts/plot_benchmarks.py
+'''
+depends = ["bench:base:compare:size"]
+alias = "bbp"
+
+[tasks."bench:base:ascii-chart"]
+run = '''
+mise run bench:base:compare:size &&
+python3 scripts/ascii_chart.py
+'''
+depends = ["bench:base:compare:size"]
+alias = "bbac"
+
+[tasks."bench:base:dashboard"]
+run = '''
+mise run bench:base:compare:size &&
+uv run python3 scripts/create_dashboard.py
+'''
+depends = ["bench:base:compare:size"]
+alias = "bbd"
+
+[tasks."bench:base:track"]
+run = '''
+mkdir -p benchmark_history &&
+mise run bench:base:compare:size &&
+timestamp=$(date +%Y%m%d_%H%M%S) &&
+cp benchmark_results.json benchmark_history/${timestamp}.json &&
+cp benchmark_results.md benchmark_history/${timestamp}.md &&
+echo "Results saved to benchmark_history/${timestamp}.*" &&
+echo "History files:" && ls -la benchmark_history/
+'''
+alias = "bbt"
+
+[tasks."bench:base:history-plot"]
+run = "uv run python3 scripts/history_plot.py"
+alias = "bbhp"
+
+[tasks."bench:clean"]
+run = "rm -f benchmark_results.* benchmark_plot.* benchmark_dashboard.html zig-out/bin/base_benchmark_*"
+alias = "bc"
+
+[tasks."bench:clean:all"]
+run = "rm -f benchmark_results.* benchmark_plot.* benchmark_dashboard.html benchmark_history_plot.* zig-out/bin/base_benchmark_* && rm -rf benchmark_history/"
+alias = "bca"
