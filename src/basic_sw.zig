@@ -138,7 +138,13 @@ pub const Matrix = struct {
 
         var matrix = try Matrix.init(alloc, lhs, rhs);
         defer matrix.deinit();
+        
+        std.debug.print("\n=== BASIC SW: {} x {} ===\n", .{lhs.len, rhs.len});
+        std.debug.print("seqA (rows): \"{s}\"\n", .{lhs});
+        std.debug.print("seqB (cols): \"{s}\"\n", .{rhs});
+        
         const scores = matrix.getScore();
+        matrix.print();
         return scores;
     }
 };

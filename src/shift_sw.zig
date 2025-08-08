@@ -30,13 +30,25 @@ pub const ShiftSW = struct {
         @memset(prev_row_scores, 0);
         @memset(vertical_gap_scores, self.gap_penalty);
 
+        std.debug.print("\n=== ROW-WISE SW: {} x {} ===\n", .{self.seqA.len, self.seqB.len});
+        std.debug.print("seqA (rows): \"{s}\"\n", .{self.seqA});
+        std.debug.print("seqB (cols): \"{s}\"\n", .{self.seqB});
+        
         // Process seqA.len rows (each row compares against one character of seqA)
         for (0..self.seqA.len) |row_idx| {
             var col_idx: usize = 0;
             while (col_idx < self.seqB.len) : (col_idx += VEC_SIZE) {
                 self.processVectorChunk(row_idx, col_idx, VEC_SIZE, &prev_row_scores, &vertical_gap_scores);
             }
+            
+            // Print current row after processing
+            std.debug.print("Row {} (seqA[{}]='{}') scores: ", .{row_idx, row_idx, self.seqA[row_idx]});
+            for (0..self.seqB.len) |j| {
+                std.debug.print("{:3} ", .{prev_row_scores[j]});
+            }
+            std.debug.print("\n", .{});
         }
+        std.debug.print("Final max score: {}\n", .{self.score});
     }
     fn processVectorChunk(
         self: *ShiftSW,
@@ -128,4 +140,22 @@ test "CTACGCTATTTCA & CTATCTCGCTATCCA" {
 
     const score = try ShiftSW.similarity(seqA, seqB);
     try testing.expectEqual(25, score);
+}
+
+test "Matrix Orientation Verification - Small Test" {
+    const seqA = "GAT";
+    const seqB = "GCT";
+    
+    std.debug.print("\n=== MATRIX ORIENTATION TEST ===\n", .{});
+    
+    // Test basic implementation
+    const basic_score = try @import("basic_sw.zig").Matrix.similarity(seqA, seqB);
+    std.debug.print("Basic SW score: {}\n", .{basic_score});
+    
+    // Test row-wise implementation  
+    const rowwise_score = try ShiftSW.similarity(seqA, seqB);
+    std.debug.print("Row-wise SW score: {}\n", .{rowwise_score});
+    
+    // They should match
+    try testing.expectEqual(basic_score, rowwise_score);
 }

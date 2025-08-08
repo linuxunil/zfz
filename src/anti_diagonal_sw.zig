@@ -23,6 +23,10 @@ pub const AntiDiagonalSW = struct {
         var prev_left: @Vector(VEC_SIZE, i16) = @splat(0);
         var max_score: i16 = 0;
 
+        std.debug.print("\n=== ANTI-DIAGONAL SW: {} x {} ===\n", .{self.seqA.len, self.seqB.len});
+        std.debug.print("seqA (rows): \"{s}\"\n", .{self.seqA});
+        std.debug.print("seqB (cols): \"{s}\"\n", .{self.seqB});
+
         const total_diag = self.seqA.len + self.seqB.len - 1;
 
         for (0..total_diag) |diag| {
@@ -108,4 +112,22 @@ test "AntiDiagonal CTACGCTATTTCA & CTATCTCGCTATCCA" {
     const score = try AntiDiagonalSW.similarity(seqA, seqB);
     // Note: This implementation has dependency issues, expected score is 25
     std.debug.print("AntiDiagonal score: {}\n", .{score});
+}
+
+test "Matrix Orientation Verification - Anti-diagonal vs Basic" {
+    const seqA = "GAT";
+    const seqB = "GCT";
+    
+    std.debug.print("\n=== ANTI-DIAGONAL MATRIX ORIENTATION TEST ===\n", .{});
+    
+    // Test basic implementation
+    const basic_score = try @import("basic_sw.zig").Matrix.similarity(seqA, seqB);
+    std.debug.print("Basic SW score: {}\n", .{basic_score});
+    
+    // Test anti-diagonal implementation  
+    const antidiag_score = try AntiDiagonalSW.similarity(seqA, seqB);
+    std.debug.print("Anti-diagonal SW score: {}\n", .{antidiag_score});
+    
+    // Compare results (they may not match due to dependency issues in anti-diagonal)
+    std.debug.print("Score comparison: Basic={}, Anti-diagonal={}\n", .{basic_score, antidiag_score});
 }
