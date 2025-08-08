@@ -3,86 +3,112 @@ const simd = std.simd;
 const testing = std.testing;
 
 pub const ShiftSW = struct {
+    alloc: std.mem.Allocator,
     seqA: []const u8,
     seqB: []const u8,
-    score: ?i16 = 0,
+    score: i16 = 0,
     max_diag: usize,
+    match_score: i16 = 3,
+    mismatch_score: i16 = 1,
+    gap_penalty: i16 = -2,
 
-    pub fn init(seqA: []const u8, seqB: []const u8) !ShiftSW {
+    pub fn init(alloc: std.mem.Allocator, seqA: []const u8, seqB: []const u8) !ShiftSW {
         return ShiftSW{
+            .alloc = alloc,
             .seqA = seqA,
             .seqB = seqB,
             .max_diag = @min(seqA.len, seqB.len),
         };
     }
 
-    pub fn scoreMatrixWithSize(self: *ShiftSW, comptime VEC_SIZE: u32) i16 {
-        var prev_prev_diag: @Vector(VEC_SIZE, i16) = @splat(0);
-        var prev_diag: @Vector(VEC_SIZE, i16) = @splat(0);
-        var prev_up: @Vector(VEC_SIZE, i16) = @splat(0);
-        var prev_left: @Vector(VEC_SIZE, i16) = @splat(0);
-        var max_score: i16 = 0;
+    pub fn scoreMatrixWithSize(self: *ShiftSW, comptime VEC_SIZE: u32) !void {
+        var prev_row_scores = try self.alloc.alloc(i16, self.seqA.len + VEC_SIZE);
+        defer self.alloc.free(prev_row_scores);
+        var vertical_gap_scores = try self.alloc.alloc(i16, self.seqA.len + VEC_SIZE);
+        defer self.alloc.free(vertical_gap_scores);
 
-        const total_diag = self.seqA.len + self.seqB.len - 1;
+        @memset(prev_row_scores, 0);
+        @memset(vertical_gap_scores, self.gap_penalty);
 
-        for (0..total_diag) |diag| {
-            const start = if (diag < self.seqB.len) 0 else diag - self.seqB.len + 1;
-            const end = @min(diag + 1, self.seqA.len);
-            const len = end - start;
-
-            var match_mask: @Vector(VEC_SIZE, bool) = @splat(false);
-            match_mask = @splat(false);
-            for (0..len) |k| {
-                const i = start + k;
-                const j = diag - i;
-                match_mask[k] = (self.seqA[i] == self.seqB[j]);
+        // Process seqB.len rows (each row compares against one character of seqB)
+        for (0..self.seqB.len) |row_idx| {
+            var col_idx: usize = 0;
+            while (col_idx < self.seqA.len) : (col_idx += VEC_SIZE) {
+                self.processVectorChunk(row_idx, col_idx, VEC_SIZE, &prev_row_scores, &vertical_gap_scores);
             }
-
-            const current = ShiftSW.cellScore(VEC_SIZE, prev_diag, prev_up, prev_left, match_mask);
-            std.debug.print("Diag {}: len={}, current=[", .{ diag, len });
-            for (0..len) |k| {
-                std.debug.print("\n\t\tscore={}, pd={}, pu={},, pl={}", .{ @max(max_score, current[k]), prev_diag[k], prev_up[k], prev_left[k] });
-                max_score = @max(max_score, current[k]);
-            }
-            std.debug.print("]\n", .{});
-            prev_prev_diag = prev_up;
-            prev_diag = prev_up;
-            prev_up = current;
-            prev_left = simd.shiftElementsRight(current, 1, 0);
         }
-        self.score = max_score;
-        return max_score;
     }
-    fn scoreMatrix(self: *ShiftSW) i16 {
+    fn processVectorChunk(
+        self: *ShiftSW,
+        row_index: usize,
+        col_start: usize,
+        comptime VEC_SIZE: u32,
+        prev_row_scores: *[]i16,
+        vertical_gap_scores: *[]i16,
+    ) void {
+        var prev_row_vector: @Vector(VEC_SIZE, i16) = undefined;
+        var vertical_gap_vector: @Vector(VEC_SIZE, i16) = undefined;
+
+        for (0..VEC_SIZE) |pos| {
+            if (col_start + pos < prev_row_scores.*.len) {
+                prev_row_vector[pos] = prev_row_scores.*[col_start + pos];
+                vertical_gap_vector[pos] = vertical_gap_scores.*[col_start + pos];
+            } else {
+                prev_row_vector[pos] = 0;
+                vertical_gap_vector[pos] = 0;
+            }
+        }
+
+        var match_mismatch_scores: @Vector(VEC_SIZE, i16) = @splat(self.mismatch_score);
+        for (0..VEC_SIZE) |pos| {
+            if (col_start + pos < self.seqA.len and row_index < self.seqB.len) {
+                if (self.seqA[col_start + pos] == self.seqB[row_index]) {
+                    match_mismatch_scores[pos] = self.match_score;
+                }
+            }
+        }
+
+        // Need to process elements sequentially to handle left dependencies
+        var left_neighbor_score: i16 = if (col_start == 0) 0 else self.gap_penalty; // Carry-over from previous chunk
+
+        for (0..VEC_SIZE) |pos| {
+            if (col_start + pos >= self.seqA.len) break;
+
+            // Calculate three scores for this position
+            const diagonal_score = prev_row_vector[pos] + match_mismatch_scores[pos]; // diagonal + match/mismatch
+            const from_above_score = prev_row_vector[pos] + self.gap_penalty; // from above + gap
+            const from_left_score = left_neighbor_score + self.gap_penalty; // from left + gap
+
+            // Smith-Waterman max of all options including 0
+            const current_cell_score = @max(@max(@max(diagonal_score, from_above_score), from_left_score), 0);
+
+            // Update arrays
+            prev_row_scores.*[col_start + pos] = current_cell_score;
+            vertical_gap_scores.*[col_start + pos] = @max(from_above_score, vertical_gap_vector[pos] + self.gap_penalty); // vertical gap extension
+            self.score = @max(self.score, current_cell_score);
+
+            // Update left carry-over for next element
+            left_neighbor_score = current_cell_score;
+        }
+    }
+    fn scoreMatrix(self: *ShiftSW) !void {
         return switch (self.max_diag) {
-            1...16 => self.scoreMatrixWithSize(16),
-            17...32 => self.scoreMatrixWithSize(32),
-            33...64 => self.scoreMatrixWithSize(64),
-            else => self.scoreMatrixWithSize(128),
+            1...16 => try self.scoreMatrixWithSize(16),
+            17...32 => try self.scoreMatrixWithSize(32),
+            // 33...64 => self.scoreMatrixWithSize(64),
+            else => try self.scoreMatrixWithSize(64),
             // 65...128 => self.scoreMatrixWithSize(128),
             // 129...256 => self.scoreMatrixWithSize(256),
             // else => self.scoreMatrixWithSize(512),
         };
     }
-
-    fn cellScore(comptime VEC_SIZE: u32, prev_diag: @Vector(VEC_SIZE, i16), prev_up: @Vector(VEC_SIZE, i16), prev_left: @Vector(VEC_SIZE, i16), match_mask: @Vector(VEC_SIZE, bool)) @Vector(VEC_SIZE, i16) {
-        const match_score: @Vector(VEC_SIZE, i16) = @splat(3);
-        const mismatch_score: @Vector(VEC_SIZE, i16) = @splat(-1);
-        const gap_penalty: @Vector(VEC_SIZE, i16) = @splat(-2);
-        const zero: @Vector(VEC_SIZE, i16) = @splat(0);
-
-        const diag_score = prev_diag + @select(i16, match_mask, match_score, mismatch_score);
-        const up_score = prev_up + gap_penalty;
-        const left_score = prev_left + gap_penalty;
-
-        const max1 = @max(diag_score, up_score);
-        const max2 = @max(left_score, zero);
-        return @max(max1, max2);
-    }
     pub fn similarity(seqA: []const u8, seqB: []const u8) !i16 {
-        var matrix = try ShiftSW.init(seqA, seqB);
-        const scores = matrix.scoreMatrix();
-        return scores;
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const alloc = arena.allocator();
+        var matrix = try ShiftSW.init(alloc, seqA, seqB);
+        try matrix.scoreMatrix();
+        return matrix.score;
     }
     pub fn getScore(self: *ShiftSW) i16 {
         return self.score orelse 0;
