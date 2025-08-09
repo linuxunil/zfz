@@ -5,8 +5,11 @@ const testing = std.testing;
 pub const AntiDiagonalSW = struct {
     seqA: []const u8,
     seqB: []const u8,
-    score: ?i16 = 0,
+    score: i16 = 0,
     max_diag: usize,
+    match_score: i16 = 3,
+    mismatch_score: i16 = 1,
+    gap_penalty: i16 = 2,
 
     pub fn init(seqA: []const u8, seqB: []const u8) !AntiDiagonalSW {
         return AntiDiagonalSW{
@@ -16,49 +19,77 @@ pub const AntiDiagonalSW = struct {
         };
     }
 
-    pub fn scoreMatrixWithSize(self: *AntiDiagonalSW, comptime VEC_SIZE: u32) i16 {
-        var prev_prev_diag: @Vector(VEC_SIZE, i16) = @splat(0);
-        var prev_diag: @Vector(VEC_SIZE, i16) = @splat(0);
-        var prev_up: @Vector(VEC_SIZE, i16) = @splat(0);
-        var prev_left: @Vector(VEC_SIZE, i16) = @splat(0);
-        var max_score: i16 = 0;
+    pub fn scoreMatrixWithSize(self: *AntiDiagonalSW, comptime VEC_SIZE: u32) void {
+        var prev_prev_diag: @Vector(VEC_SIZE, i16) = @splat(0); // 2 diagonals ago
+        var prev_diag: @Vector(VEC_SIZE, i16) = @splat(0); // what we just scored
+        const gap_score: @Vector(VEC_SIZE, i16) = @splat(self.gap_penalty);
+        const match: @Vector(VEC_SIZE, i16) = @splat(self.match_score);
+        const mismatch: @Vector(VEC_SIZE, i16) = @splat(self.mismatch_score);
 
-        std.debug.print("\n=== ANTI-DIAGONAL SW: {} x {} ===\n", .{self.seqA.len, self.seqB.len});
-        std.debug.print("seqA (rows): \"{s}\"\n", .{self.seqA});
-        std.debug.print("seqB (cols): \"{s}\"\n", .{self.seqB});
-
-        const total_diag = self.seqA.len + self.seqB.len - 1;
+        const total_diag = self.seqA.len + self.seqB.len - 2;
 
         for (0..total_diag) |diag| {
-            const start = if (diag < self.seqB.len) 0 else diag - self.seqB.len + 1;
-            const end = @min(diag + 1, self.seqA.len);
-            const len = end - start;
+            // Fill Match mask
+            const first_cell = if (diag < self.seqB.len) 0 else diag - self.seqB.len + 1;
+            const last_cell = @min(diag + 1, self.seqA.len);
+            const diag_length = last_cell - first_cell;
 
-            var match_mask: @Vector(VEC_SIZE, bool) = @splat(false);
-            match_mask = @splat(false);
-            for (0..len) |k| {
-                const i = start + k;
+            var match_mask: @Vector(VEC_SIZE, bool) = @splat(false); // the matches for this anti-diagonal
+            std.debug.print("\nDiag {}: start={}, end={}, len={}\n", .{ diag, first_cell, last_cell, diag_length });
+            for (0..diag_length) |cell| {
+                const i = first_cell + cell;
                 const j = diag - i;
-                match_mask[k] = (self.seqA[i] == self.seqB[j]);
+                std.debug.print("  k={}: i={}, j={}, seqA[{}]='{c}', seqB[{}]='{c}', match={}\n", .{ cell, i, j, i, self.seqA[i], j, self.seqB[j], self.seqA[i] == self.seqB[j] });
+                if (i > 0 and j > 0) {
+                    match_mask[cell] = (self.seqA[i - 1] == self.seqB[j - 1]);
+                }
             }
 
-            const current = AntiDiagonalSW.cellScore(VEC_SIZE, prev_diag, prev_up, prev_left, match_mask);
-            std.debug.print("Diag {}: len={}, current=[", .{ diag, len });
-            for (0..len) |k| {
-                std.debug.print("\n\t\tscore={}, pd={}, pu={},, pl={}", .{ @max(max_score, current[k]), prev_diag[k], prev_up[k], prev_left[k] });
-                max_score = @max(max_score, current[k]);
+            //Upscore is the previous row shifted <- one.
+            const upscore = simd.shiftElementsRight(prev_diag, 1, 0) - gap_score;
+            //Leftscore is the previous diag
+            const leftscore = prev_diag - gap_score;
+            // Matchscore is the match_mask made previously
+            const matchscore = @select(i16, match_mask, match, -mismatch);
+            //Diagscore is previous previous shifted <- one
+            const up_left_score = simd.shiftElementsRight(prev_prev_diag, 1, 0) + matchscore;
+            // Reset current line
+            var current_diag: @Vector(VEC_SIZE, i16) = @splat(0); // what we are currently scoring
+            // Fine the max of each line and put it in that spot for the current diag.
+            current_diag = @max(@max(@max(upscore, leftscore), up_left_score), current_diag);
+
+            // Debug print diagonal values
+            // std.debug.print("\nDiag {}: ", .{diag});
+            // for (0..len) |k| {
+            //     std.debug.print("{} ", .{current_diag[k]});
+            // }
+
+            // Find our highest scoring cell
+            const score = @reduce(.Max, current_diag);
+            // If its our highest score make it the current high_score
+            if (self.score < score) {
+                self.score = score;
             }
-            std.debug.print("]\n", .{});
-            prev_prev_diag = prev_up;
-            prev_diag = prev_up;
-            prev_up = current;
-            prev_left = simd.shiftElementsRight(current, 1, 0);
+            prev_prev_diag = prev_diag; // using lefscore because it is the unshifted previous
+            prev_diag = current_diag; // Current line becomes the previous line.
+
+            // prev_diag_match = prev_diag + @select(i16, match_mask, match_score, mismatch_score);
+            // shifted_prev_diag = simd.shiftElementsRight(prev_diag, 1, 0);
+            // prev_diag = prev_diag + gap_score;
+            //
+            // current_diag = @max(@max(@max(prev_prev_diag, prev_diag), prev_diag_match), shifted_prev_diag);
+            //
+            // const score = @reduce(.Max, current_diag);
+            // if (score > self.score) {
+            //     self.score = score;
+            // }
+            //
+            // prev_prev_diag = shifted_prev_diag;
+            // prev_diag = current_diag;
         }
-        self.score = max_score;
-        return max_score;
     }
-    
-    fn scoreMatrix(self: *AntiDiagonalSW) i16 {
+
+    fn scoreMatrix(self: *AntiDiagonalSW) void {
         return switch (self.max_diag) {
             1...16 => self.scoreMatrixWithSize(16),
             17...32 => self.scoreMatrixWithSize(32),
@@ -70,64 +101,42 @@ pub const AntiDiagonalSW = struct {
         };
     }
 
-    fn cellScore(comptime VEC_SIZE: u32, prev_diag: @Vector(VEC_SIZE, i16), prev_up: @Vector(VEC_SIZE, i16), prev_left: @Vector(VEC_SIZE, i16), match_mask: @Vector(VEC_SIZE, bool)) @Vector(VEC_SIZE, i16) {
-        const match_score: @Vector(VEC_SIZE, i16) = @splat(3);
-        const mismatch_score: @Vector(VEC_SIZE, i16) = @splat(-1);
-        const gap_penalty: @Vector(VEC_SIZE, i16) = @splat(-2);
-        const zero: @Vector(VEC_SIZE, i16) = @splat(0);
-
-        const diag_score = prev_diag + @select(i16, match_mask, match_score, mismatch_score);
-        const up_score = prev_up + gap_penalty;
-        const left_score = prev_left + gap_penalty;
-
-        const max1 = @max(diag_score, up_score);
-        const max2 = @max(left_score, zero);
-        return @max(max1, max2);
-    }
-    
     pub fn similarity(seqA: []const u8, seqB: []const u8) !i16 {
         var matrix = try AntiDiagonalSW.init(seqA, seqB);
-        const scores = matrix.scoreMatrix();
-        return scores;
-    }
-    
-    pub fn getScore(self: *AntiDiagonalSW) i16 {
-        return self.score orelse 0;
+        matrix.scoreMatrix();
+        return matrix.score;
     }
 };
-
+// test "GCGATTA & GCTTAC" {
+//     const seqA = "GCGATTA";
+//     const seqB = "GCTTAC";
+//
+//     const score = try AntiDiagonalSW.similarity(seqB, seqA);
+//     try testing.expectEqual(11, score);
+// }
 test "AntiDiagonal GCGATTA & GCTTAC" {
     const seqA = "GCGATTA";
     const seqB = "GCTTAC";
 
-    const score = try AntiDiagonalSW.similarity(seqA, seqB);
-    // Note: This implementation has dependency issues, expected score is 11
-    std.debug.print("AntiDiagonal score: {}\n", .{score});
+    var score = try AntiDiagonalSW.similarity(seqA, seqB);
+    try testing.expectEqual(11, score);
+    score = try AntiDiagonalSW.similarity(seqB, seqA);
+    try testing.expectEqual(11, score);
 }
 
-test "AntiDiagonal CTACGCTATTTCA & CTATCTCGCTATCCA" {
-    const seqA = "CTACGCTATTTCA";
-    const seqB = "CTATCTCGCTATCCA";
-
-    const score = try AntiDiagonalSW.similarity(seqA, seqB);
-    // Note: This implementation has dependency issues, expected score is 25
-    std.debug.print("AntiDiagonal score: {}\n", .{score});
-}
-
-test "Matrix Orientation Verification - Anti-diagonal vs Basic" {
-    const seqA = "GAT";
-    const seqB = "GCT";
-    
-    std.debug.print("\n=== ANTI-DIAGONAL MATRIX ORIENTATION TEST ===\n", .{});
-    
-    // Test basic implementation
-    const basic_score = try @import("basic_sw.zig").Matrix.similarity(seqA, seqB);
-    std.debug.print("Basic SW score: {}\n", .{basic_score});
-    
-    // Test anti-diagonal implementation  
-    const antidiag_score = try AntiDiagonalSW.similarity(seqA, seqB);
-    std.debug.print("Anti-diagonal SW score: {}\n", .{antidiag_score});
-    
-    // Compare results (they may not match due to dependency issues in anti-diagonal)
-    std.debug.print("Score comparison: Basic={}, Anti-diagonal={}\n", .{basic_score, antidiag_score});
-}
+// test "AntiDiagonal CTACGCTATTTCA & CTATCTCGCTATCCA" {
+//     const seqA = "CTACGCTATTTCA";
+//     const seqB = "CTATCTCGCTATCCA";
+//
+//     var score = try AntiDiagonalSW.similarity(seqA, seqB);
+//     try testing.expectEqual(25, score);
+//     score = try AntiDiagonalSW.similarity(seqB, seqA);
+//     try testing.expectEqual(25, score);
+// }
+// test "CTACGCTATTTCA & CTATCTCGCTATCCA" {
+//     const seqA = "CTACGCTATTTCA";
+//     const seqB = "CTATCTCGCTATCCA";
+//
+//     const score = try AntiDiagonalSW.similarity(seqB, seqA);
+//     try testing.expectEqual(25, score);
+// }

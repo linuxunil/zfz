@@ -1,0 +1,27 @@
+[tasks.test-all]
+description = "Run all tests"
+run = "zig build test"
+
+[tasks.test-basic]
+description = "Run basic SW tests"
+run = 'zig test src/basic_sw.zig --test-filter "basic"'
+
+[tasks.test-row]
+description = "Run row-wise SW tests"
+run = 'zig test src/row_sw.zig --test-filter "Row"'
+
+[tasks.test-anti]
+description = "Run anti-diagonal SW tests"
+run = 'zig test src/anti_diagonal_sw.zig --test-filter "AntiDiagonal"'
+
+[tasks.test-compare]
+description = "Compare all implementations"
+run = 'zig test src/root.zig --test-filter "orientation"'
+
+[tasks.benchmark]
+description = "Run benchmarks"
+run = "zig build benchmark"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "rm -rf zig-out .zig-cache"

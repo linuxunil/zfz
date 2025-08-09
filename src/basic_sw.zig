@@ -118,18 +118,8 @@ pub const Matrix = struct {
         };
     }
     pub fn print(self: *Matrix) void {
-        std.debug.print("\n{s}\n", .{"--" ** 30});
-        for (0..self.rows) |i| {
-            for (0..self.cols) |j| {
-                if ((i <= 0) or (j <= 0)) {
-                    std.debug.print("{c:>5}", .{self.get(i, j)});
-                } else {
-                    std.debug.print("{d:>5}", .{self.get(i, j)});
-                }
-            }
-            std.debug.print("\n", .{});
-        }
-        std.debug.print("\n{s}\n", .{"--" ** 30});
+        // Printing disabled
+        _ = self;
     }
     pub fn similarity(lhs: []const u8, rhs: []const u8) !u8 {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -139,12 +129,10 @@ pub const Matrix = struct {
         var matrix = try Matrix.init(alloc, lhs, rhs);
         defer matrix.deinit();
         
-        std.debug.print("\n=== BASIC SW: {} x {} ===\n", .{lhs.len, rhs.len});
-        std.debug.print("seqA (rows): \"{s}\"\n", .{lhs});
-        std.debug.print("seqB (cols): \"{s}\"\n", .{rhs});
+        // Debug printing disabled
         
         const scores = matrix.getScore();
-        matrix.print();
+        // matrix.print();
         return scores;
     }
 };
